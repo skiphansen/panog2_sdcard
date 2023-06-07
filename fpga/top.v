@@ -42,6 +42,9 @@ module top
      ,output        mdc_o
      ,inout         mdio_io
 `endif
+`ifdef DVI_AS_GPIO
+     ,inout  [12:0] GPIO_PIN
+`endif
 );
 
 // Generate 50 Mhz system clock and 24 Mhz USB clock from 125 Mhz input clock
@@ -200,7 +203,8 @@ assign sdcard_cs_o = spi_cs_w[1];
 // 5: Wolfson codec SDA
 // 6: Wolfson codec SCL
 // 7: GMII reset
-// 9...31: Not implmented
+// 8->20: GPIO_PIN[0] -> GPIO_PIN[12]
+// 21->31: Not implmented
 //-----------------------------------------------------------------
 
 assign gpio_in_w[0]  = gpio_out_w[0];
@@ -220,16 +224,28 @@ assign gpio_in_w[4]  = led_blue;
 assign codec_sda = gpio_out_en_w[5]  ? gpio_out_w[5]  : 1'bz;
 assign gpio_in_w[5]  = codec_sda;
 
-
 assign codec_scl = gpio_out_en_w[6]  ? gpio_out_w[6]  : 1'bz;
 assign gpio_in_w[6]  = codec_scl;
 
-genvar i;
-generate
-for (i=7; i < 32; i=i+1) begin : gpio_in
-    assign gpio_in_w[i]  = 1'b0;
-end
-endgenerate
+`ifdef DVI_AS_GPIO
+    genvar i;
+    generate
+    for (i=0; i < 13; i=i+1) begin : gpio_in
+        assign GPIO_PIN[i] = gpio_out_en_w[8+i] ? gpio_out_w[8+i] : 1'bz;
+        assign gpio_in_w[8+i] = GPIO_PIN[i];
+    end
+    for (i=21; i < 32; i=i+1) begin : empty_gpio_in
+        assign gpio_in_w[i]  = 1'b0;
+    end
+    endgenerate
+`else
+    genvar i;
+    generate
+    for (i=7; i < 32; i=i+1) begin : gpio_in
+        assign gpio_in_w[i]  = 1'b0;
+    end
+    endgenerate
+`endif
 
 //-----------------------------------------------------------------
 // UART Tx combine

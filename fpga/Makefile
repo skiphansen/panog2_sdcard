@@ -4,6 +4,7 @@
 include ../project.mk
 
 INCLUDE_ETHERNET ?= y
+DVI_AS_GPIO ?= n
 
 SRC_DIR       = .
 SRC_DIR      += $(CORES_DIR)/core_soc/src_v
@@ -21,6 +22,10 @@ EXCLUDE_SRC  += $(CORES_DIR)/ethernet_mac/ethernet_mac_tb.vhd
 EXTRA_VFLAGS += INCLUDE_ETHERNET=1
 else
 EXCLUDE_SRC += $(abspath ./eth_axi4lite.v)
+endif
+
+ifeq ($(DVI_AS_GPIO),y)
+EXTRA_VFLAGS += DVI_AS_GPIO=1
 endif
 
 EXCLUDE_SRC  += $(CORES_DIR)/core_soc/src_v/core_soc.v
@@ -73,12 +78,7 @@ firmware.mem:
 
 debug:
 	echo "INCLUDE_ETHERNET: $(INCLUDE_ETHERNET)"
-	echo "SRC_DIR: $(SRC_DIR)"
+	echo "DVI_AS_GPIO: $(DVI_AS_GPIO)"
 	echo "USE_CHIPSCOPE: $(USE_CHIPSCOPE)"
-ifeq ($(USE_CHIPSCOPE),FALSE)
-	echo "USE_CHIPSCOPE is false"
-else
-	echo "USE_CHIPSCOPE is NOT false"
-endif
 
 
