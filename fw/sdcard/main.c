@@ -10,19 +10,17 @@
 #include "uart_lite.h"
 #include "cmd_parser.h"
 #include "pano_io.h"
+#include "diskio.h"
 #define DEBUG_LOGGING         1
 // #define VERBOSE_DEBUG_LOGGING 1
 #include "log.h"
 
-#define EXTERNAL_GPIO_SHIFT      8
-#define EXTERNAL_GPIO_MASK       0x1fff   // 13 bits
-#define REG_WR(reg, wr_data)       *((volatile uint32_t *)(reg)) = (wr_data)
-#define REG_RD(reg)                *((volatile uint32_t *)(reg))
-
 bool ButtonJustPressed(void);
 int TestSignalCmd(char *CmdLine);
+int DiskInitCmd(char *CmdLine);
 
 const CommandTable_t gCmdTable[] = {
+   { "disk_init","Initialize SDCARD interface", NULL, DiskInitCmd},
    { "test_signal","Send binary count to SDCARD GPIO pins", NULL, TestSignalCmd},
    { "?", NULL, NULL, HelpCmd},
    { "help",NULL, NULL, HelpCmd},
@@ -170,6 +168,21 @@ int TestSignalCmd(char *CmdLine)
       }
    } while(!uartlite_haschar());
    uartlite_getchar();
+
+   return RESULT_OK;
+}
+
+int DiskInitCmd(char *CmdLine)
+{
+   DSTATUS Status;
+
+   printf("Press any key to exit\n");
+   do {
+      Status = disk_initialize(0);
+      break;
+   } while(Status !=0 && !uartlite_haschar());
+   uartlite_getchar();
+   LOG("disk_initialize returned %d\n",Status);
 
    return RESULT_OK;
 }

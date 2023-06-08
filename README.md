@@ -10,7 +10,7 @@
 | DVI_D[3]  | CS/D3  | inside 4       | 24   | orange | A14  |
 | DVI_D[4]  | D1     | outside 5      | 21   | red    | A17  |
 | DVI_D[5]  | D2     | inside 5       | 19   | black  | A18  |
-| DVI_D[6]  |   -    | outside 7      | 20   | white  | D14  |
+| DVI_D[6]  | DET    | outside 7      | 20   | white  | D14  |
 | DVI_D[7]  |   -    | inside 7       | 17   | gray   | B14  |
 | DVI_D[8]  |   -    | outside 8      | 18   | violet | B16  |
 | DVI_D[9]  |   -    | inside 8       | 15   | blue   | B18  |
