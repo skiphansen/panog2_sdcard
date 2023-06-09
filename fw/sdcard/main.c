@@ -10,6 +10,7 @@
 #include "uart_lite.h"
 #include "cmd_parser.h"
 #include "pano_io.h"
+#include "ff.h"
 #include "diskio.h"
 #define DEBUG_LOGGING         1
 // #define VERBOSE_DEBUG_LOGGING 1
@@ -17,9 +18,11 @@
 
 bool ButtonJustPressed(void);
 int TestSignalCmd(char *CmdLine);
+int DirCmd(char *CmdLine);
 int DiskInitCmd(char *CmdLine);
 
 const CommandTable_t gCmdTable[] = {
+   { "dir", "directory <path>",NULL, DirCmd},
    { "disk_init","Initialize SDCARD interface", NULL, DiskInitCmd},
    { "test_signal","Send binary count to SDCARD GPIO pins", NULL, TestSignalCmd},
    { "?", NULL, NULL, HelpCmd},
@@ -52,8 +55,6 @@ int main(int argc, char *argv[])
     Temp = REG_RD(GPIO_BASE + GPIO_DIRECTION);
     Temp |= GPIO_BIT_RED_LED|GPIO_BIT_GREEN_LED|GPIO_BIT_BLUE_LED;
     REG_WR(GPIO_BASE + GPIO_DIRECTION,Temp);
-
-    Led = GPIO_BIT_RED_LED;
 
     ALOG_R(gVerStr);
     CmdParserInit(gCmdTable,printf);
@@ -184,5 +185,76 @@ int DiskInitCmd(char *CmdLine)
    uartlite_getchar();
    LOG("disk_initialize returned %d\n",Status);
 
+   return RESULT_OK;
+}
+
+DIR Dir;             /* Directory object */
+FILINFO Finfo;
+
+int DirCmd(char *CmdLine)
+{
+   int res;
+   QWORD acc_size = 0;
+   DWORD acc_dirs = 0;
+   DWORD acc_files = 0;
+   DWORD dw;
+   FATFS *fs;
+   FATFS FatFs;           /* File system object for each logical drive */
+
+   do {
+      res = f_mount(&FatFs, "", 1);
+      if(res != FR_OK) {
+         ELOG("Unable to mount filesystem: %d\n",res);
+         break;
+      }
+
+      res = f_opendir(&Dir,CmdLine);
+      if(res) {
+         ELOG("f_opendir failed: %d\n",res);
+         break;
+      }
+
+      while(true) {
+         res = f_readdir(&Dir, &Finfo);
+         if(res != FR_OK){
+            ELOG("f_readdir failed: %d\n",res);
+            break;
+         }
+         if(!Finfo.fname[0]) {
+            break;
+         }
+         if(Finfo.fattrib & AM_DIR) {
+            acc_dirs++;
+         } 
+         else {
+            acc_files++; 
+            acc_size += Finfo.fsize;
+         }
+         printf("%c%c%c%c%c %u/%02u/%02u %02u:%02u %9llu  %s\n",
+                (Finfo.fattrib & AM_DIR) ? 'D' : '-',
+                (Finfo.fattrib & AM_RDO) ? 'R' : '-',
+                (Finfo.fattrib & AM_HID) ? 'H' : '-',
+                (Finfo.fattrib & AM_SYS) ? 'S' : '-',
+                (Finfo.fattrib & AM_ARC) ? 'A' : '-',
+                (Finfo.fdate >> 9) + 1980, 
+                (Finfo.fdate >> 5) & 15, 
+                Finfo.fdate & 31,
+                (Finfo.ftime >> 11), 
+                (Finfo.ftime >> 5) & 63,
+                (QWORD)Finfo.fsize, Finfo.fname);
+      }
+      if(res != FR_OK){
+         break;
+      }
+      printf("%4u File(s),%10llu bytes total\n%4u Dir(s)", acc_files, acc_size, acc_dirs);
+      res = f_getfree(CmdLine, &dw, &fs);
+      if(res == FR_OK) {
+         printf(", %10llu bytes free\n", (QWORD)dw * fs->csize * 512);
+      }
+      else {
+         ELOG("f_getfree failed: %d\n",res);
+         break;
+      }
+   } while(false);
    return RESULT_OK;
 }

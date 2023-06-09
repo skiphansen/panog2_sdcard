@@ -6,8 +6,10 @@ TARGET       = sdcard
 SRC_DIR      = .
 SRC_DIR     += $(CORES_DIR)/core_soc/src_c
 SRC_DIR     += $(PANO_FW_DIR)/lib/libstd
+EXCLUDE_SRC += $(PANO_FW_DIR)/lib/libstd/printf.c
 EXTRA_SRC   += $(PANO_FW_DIR)/common/spi_drv.c
 EXTRA_SRC   += $(PANO_FW_DIR)/common/cmd_parser.c
+EXTRA_CFLAGS += -DALTERNATE_PRINTF
 
 INCLUDE_PATH += ../include
 INCLUDE_PATH += $(PANO_FW_DIR)/common
