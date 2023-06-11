@@ -9,6 +9,7 @@ SRC_DIR     += $(PANO_FW_DIR)/lib/libstd
 EXCLUDE_SRC += $(PANO_FW_DIR)/lib/libstd/printf.c
 EXTRA_SRC   += $(PANO_FW_DIR)/common/spi_drv.c
 EXTRA_SRC   += $(PANO_FW_DIR)/common/cmd_parser.c
+EXTRA_SRC   += $(PANO_FW_DIR)/common/log.c
 EXTRA_CFLAGS += -DALTERNATE_PRINTF
 
 INCLUDE_PATH += ../include

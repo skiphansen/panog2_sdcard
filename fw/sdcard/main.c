@@ -12,6 +12,7 @@
 #include "pano_io.h"
 #include "ff.h"
 #include "diskio.h"
+#include "sdmm.h"
 #define DEBUG_LOGGING         1
 // #define VERBOSE_DEBUG_LOGGING 1
 #include "log.h"
@@ -20,8 +21,10 @@ bool ButtonJustPressed(void);
 int TestSignalCmd(char *CmdLine);
 int DirCmd(char *CmdLine);
 int DiskInitCmd(char *CmdLine);
+int CSD_Cmd(char *CmdLine);
 
 const CommandTable_t gCmdTable[] = {
+   { "csd", "dump CSD register", NULL, CSD_Cmd},
    { "dir", "directory <path>",NULL, DirCmd},
    { "disk_init","Initialize SDCARD interface", NULL, DiskInitCmd},
    { "test_signal","Send binary count to SDCARD GPIO pins", NULL, TestSignalCmd},
@@ -256,5 +259,268 @@ int DirCmd(char *CmdLine)
          break;
       }
    } while(false);
+   return RESULT_OK;
+}
+
+// Calculate CRC7
+// It's a 7 bit CRC with polynomial x^7 + x^3 + 1
+// input:
+//   crcIn - the CRC before (0 for first step)
+//   data - byte for CRC calculation
+// return: the new CRC7
+uint8_t CRC7_one(uint8_t crcIn, uint8_t data) {
+   const uint8_t g = 0x89;
+   uint8_t i;
+
+   crcIn ^= data;
+   for (i = 0; i < 8; i++) {
+      if (crcIn & 0x80) crcIn ^= g;
+      crcIn <<= 1;
+   }
+
+   return crcIn;
+}
+
+// Calculate CRC7 value of the buffer
+// input:
+//   pBuf - pointer to the buffer
+//   len - length of the buffer
+// return: the CRC7 value
+uint8_t CRC7_buf(uint8_t *pBuf, uint8_t len) {
+   uint8_t crc = 0;
+
+   while (len--) crc = CRC7_one(crc,*pBuf++);
+
+   return crc;
+}
+
+const int LenMask[] = {
+   0x001,
+   0x003,
+   0x007,
+   0x00f,
+   0x01f,
+   0x03f,
+   0x07f,
+   0x0ff,
+   0x1ff,
+   0x3ff,
+   0x7ff,
+   0xfff
+};
+
+/* Bit numbers are from 127 (first bit of 16 bytes) to zero (last bit of 16 bytes)
+Data is in little endan format and our processor is little endian
+ 
+Example parsing of raw data:
+40 0e 00 32 5b 59 00 00 77 5d 7f 80 0a 40 00 a3 
+ 
+  01xx xxxx = version 2             offset 0, shift 6
+  xx00 0000 reserved                offset 0, shift 0
+  0e TAAC                           offset 1, shift 0
+  00 NSAC                           offset 2, shift 0
+  32 TRAN_SPEED                     offset 3, shift 0
+  5b 5x  0101 1011 0101 <- CCC      offset 4, shift 0
+         x1x1 1011 01x1 <- Required for version 2
+  x9 READ_BL_LEN                    offset 6, shift 0
+ 
+  xxx0 xxxx READ_BL_PARTIAL         offset 6, shift 4
+  xx0x xxxx WRITE_BLK_MISALIGH      offset 6, shift 5
+  x0xx xxxx WRITE_BLK_MISALIGH      offset 6, shift 6
+  0xxx xxxx READ_BLK_MISALIGH       offset 6, shift 7
+  xxxx xxx0 DSR_IMP                 offset 7, shift 0
+  x000 000x reserved                offset 7, shift 1
+  0xxx 77 5d C_SIZE                 offset 7, shift 7
+ 
+  7f 80 0a 40 00 a3
+*/
+
+// This routine is based on UNSTUFF_BITS() from Linux driver.
+/*
+ *  linux/drivers/mmc/core/sd.c
+ *
+ *  Copyright (C) 2003-2004 Russell King, All Rights Reserved.
+ *  SD support Copyright (C) 2004 Ian Molton, All Rights Reserved.
+ *  Copyright (C) 2005-2007 Pierre Ossman, All Rights Reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
+int CSD_SLICE(uint32_t *csd,int EndBit,int StartBit)
+{
+   uint32_t Bits = EndBit - StartBit + 1;
+   uint32_t Mask = (Bits < 32 ? 1 << Bits : 0) - 1;
+   int Offset = 3 - (StartBit / 32);
+   int Shift = StartBit & 31;
+   uint32_t Ret = csd[Offset] >> Shift;
+
+   if((Bits + Shift) > 32) {
+      Ret |= csd[Offset-1] << ((32 - Shift) % 32);
+   }
+   Ret &= Mask;
+
+#if 0
+   LOG("%d:%d - Bits %d, Shift %d, Offset %d ",EndBit,StartBit,Bits,Shift,Offset);
+   LOG("Returning %d,0x%x\n",Ret,Ret);
+#endif
+
+   return Ret;
+}
+
+typedef struct  {
+   const char *Desc;
+   uint8_t EndBit;
+   uint8_t StartBit;
+   uint8_t ParseFlags;
+} ParseCSDTable;
+
+#define CSD_FLAG_V1           0x80
+#define CSD_FLAG_V2           0x40
+#define CSD_FLAG_V3           0x20
+#define CSD_FLAG_ALL          (CSD_FLAG_V1 | CSD_FLAG_V2 | CSD_FLAG_V3)
+#define CSD_FLAG_V2_V3_FIXED  0x10
+#define CSD_FLAG_VER_MASK     (CSD_FLAG_ALL | CSD_FLAG_V2_V3_FIXED)
+#define CSD_FLAG_CSIZE        1
+
+const ParseCSDTable gCsdVer1[] = {
+   {"TAAC",119,112,CSD_FLAG_V2_V3_FIXED},
+   {"NSAC",111,104,CSD_FLAG_V2_V3_FIXED},
+   {"TRAN_SPEED",103,96,CSD_FLAG_V2_V3_FIXED},
+   {"CCC",95,84,CSD_FLAG_ALL},                // 
+   {"READ_BL_LEN",83,80,CSD_FLAG_V2_V3_FIXED},
+   {"READ_BL_PARTIAL",79,79,CSD_FLAG_V2_V3_FIXED},
+   {"WRITE_BLK_MISALIGH",78,78,CSD_FLAG_V2_V3_FIXED},
+   {"READ_BLK_MISALIGH",77,77,CSD_FLAG_V2_V3_FIXED},
+   {"DSR_IMP",76,76,CSD_FLAG_ALL},
+   {"C_SIZE",73,62,CSD_FLAG_V1 | CSD_FLAG_CSIZE},
+   {"C_SIZE",69,48,CSD_FLAG_V2 | CSD_FLAG_CSIZE},
+   {"C_SIZE",75,48,CSD_FLAG_V3 | CSD_FLAG_CSIZE},
+   {"VDD_R_CURR_MIN",61,59,CSD_FLAG_V1},
+   {"VDD_R_CURR_MAX",58,56,CSD_FLAG_V1},
+   {"VDD_W_CURR_MIN",55,53,CSD_FLAG_V1},
+   {"VDD_W_CURR_MAX",52,50,CSD_FLAG_V1},
+   {"C_SIZE_MULT",49,47,CSD_FLAG_V1},
+   {"ERASE_BLK_EN",46,46,CSD_FLAG_V2_V3_FIXED},
+   {"SECTOR_SIZE",45,39,CSD_FLAG_V2_V3_FIXED},
+   {"WP_GRP_SIZE",38,32,CSD_FLAG_V2_V3_FIXED},
+   {"WP_GRP_ENABLE",31,31,CSD_FLAG_V2_V3_FIXED},
+   {"R2W_FACTOR",28,26,CSD_FLAG_V2_V3_FIXED},
+   {"WRITE_BL_LEN",25,22,CSD_FLAG_V2_V3_FIXED},
+   {"WRITE_BL_PARTIAL",21,21,CSD_FLAG_V2_V3_FIXED},
+   {"FILE_FORMAT_GRP",15,15,CSD_FLAG_V2_V3_FIXED},
+   {"COPY",14,14,CSD_FLAG_ALL},
+   {"PERM_WRITE_PROTECT",13,13,CSD_FLAG_ALL},
+   {"TMP_WRITE_PROTECT",12,12,CSD_FLAG_ALL},
+   {"FILE_FORMAT",11,10,CSD_FLAG_V2_V3_FIXED},
+   {"WP_UPC",9,9,CSD_FLAG_ALL},
+   {"CRC",7,1,CSD_FLAG_ALL},
+   {"STOP",0,0,CSD_FLAG_ALL},
+   {NULL}   // end of table
+};
+
+int CSD_Cmd(char *CmdLine)
+{
+   BYTE raw_csd[16];
+   BYTE csd[16];
+   BYTE Err;
+   int Line = 0;
+   int x;
+   const ParseCSDTable *p;
+   uint8_t crc;
+   int CsdVer;
+   uint8_t VerMask;
+   uint8_t Flags;
+   int64_t C_Size;
+   bool bDisplayAll = false;
+
+   if(strcasecmp(CmdLine,"all") == 0) {
+      bDisplayAll = true;
+      LOG("bDisplayAll\n");
+   }
+
+   do {
+      if((Err = send_cmd(CMD9,0) != 0)) {
+         Line = __LINE__;
+         break;
+      }
+      if((Err = rcvr_datablock(raw_csd,sizeof(raw_csd))) != 1) {
+         Line = __LINE__;
+         break;
+      }
+   // Convert raw CSD data to from big endian 32 bit words to little endian
+   // (Linux kernal calls be32_to_cpu to do this)
+      for(int i = 0; i < 4; i++) {
+         for(int j = 0; j < 4; j++) {
+            csd[(i * 4) + j] = raw_csd[(i * 4) +3-j];
+         }
+      }
+      LOG_HEX(csd,sizeof(csd));
+
+      x = CSD_SLICE((uint32_t *)csd,125,120);
+      if(x != 0) {
+      // Invalid, button 6 bits should be zero
+         Line = __LINE__;
+         break;
+      }
+      CsdVer = CSD_SLICE((uint32_t *)csd,127,126);
+      printf("CSD Version: %d\n",CsdVer + 1);
+      VerMask = CSD_FLAG_V1 >> CsdVer;
+      p = gCsdVer1;
+
+      while(p->Desc != NULL) {
+         Flags = p->ParseFlags & CSD_FLAG_VER_MASK;
+         if(Flags & VerMask || (bDisplayAll && Flags == CSD_FLAG_V2_V3_FIXED)) {
+            x = CSD_SLICE((uint32_t *)csd,p->EndBit,p->StartBit);
+            switch(p->ParseFlags & ~CSD_FLAG_VER_MASK) {
+               case 0:
+                  printf("%s: %d (0x%x)\n",p->Desc,x,x);
+                  break;
+
+               case CSD_FLAG_CSIZE:
+                  switch(VerMask) {
+                     case CSD_FLAG_V1:
+                        printf("%s: %d (0x%x)\n",p->Desc,x,x);
+                        break;
+
+                     case CSD_FLAG_V2:
+                     case CSD_FLAG_V3:
+                        C_Size = ((int64_t) x + 1) * 512;
+                        printf("C_SIZE %lld Kbytes, ",C_Size);
+                        C_Size /= 1024;
+                        printf("%lld megabytes, ",C_Size);
+                        C_Size /= 1024;
+                        printf("%lld gigabytes\n",C_Size);
+                        break;
+
+                     default:
+                        ELOG("Internal error\n");
+                        break;
+                  }
+                  break;
+            }
+         }
+         p++;
+      }
+   } while(false);
+#if 0
+   crc = CRC7_buf(csd,sizeof(csd) - 1);
+   LOG("CRC 0x%x\n",crc);
+
+   memset(csd,0,sizeof(csd));
+   csd[0] = 0x40;
+   crc = CRC7_buf(csd,5);
+   LOG("CMD0 CRC 0x%x\n",crc);
+
+   csd[0] = 0x48;
+   csd[3] = 1;
+   csd[4] = 0xaa;
+   crc = CRC7_buf(csd,5);
+   LOG("CMD8 CRC 0x%x\n",crc);
+#endif
+
+   if(Line != 0) {
+      LOG("Failure on line %d, %d\n",Line,Err);
+   }
    return RESULT_OK;
 }
