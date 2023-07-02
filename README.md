@@ -1,3 +1,30 @@
+## SD Card support for Pano Logic Thin Clients
+
+https://github.com/skiphansen/panog2_sdcard
+
+This is a work in progress to provide mass storage support for G2 Panos since I have 
+been unable to get USB working.  
+
+USB of course would be ideal if we can get [panog2_usb](https://github.com/skiphansen/panog2_usb) working!
+**HELP** is **welcome** and **NEEDED**!
+
+## Project Status
+
+Basics are working, able to list a directory of SD Card that was cerated on a PC.  A simple test CLI is provided via
+a serial port 
+
+## HW Requirements
+
+* A Pano Logic G2
+* A suitable 5 volt power supply
+* A JTAG programmer to load the bitstream into the FPGA.
+
+## Connecting SD Card
+
+The ultimate plan is to connect the SD Card in parallel with the existing SPI flash using the SPI flash's write protect line 
+as a chip select for the SD card.  This should be allow an SD card to be added without compromising any other functionality.
+
+Currently for wiring convenience I have connected the SD Card to some of the DVI port signals. 
 
 | Pano      | SDCARD | board to board<br>connector pin| CN3<br>pin  | ribbon cable<br>color | FPGA<br>pin |  
 |-----------|--------|----------------|------|--------|------|
@@ -17,3 +44,17 @@
 | DVI_D[10] |   -    | outside 9      | 16   | green  | E16  |
 | DVI_D[11] |   -    | inside 9       | 13   | yellow | D15  |
 | DVI_H     |   -    | inside 20      | 14   | orange | F12  |
+
+## Serial port 
+
+Please see the [fpga_test_soc](https://github.com/skiphansen/fpga_test_soc/tree/master/fpga/panologic_g2#serial-port) for connection information.
+
+## Building, etc
+
+**TODO**
+
+## Pano Links
+
+Links to other Pano logic information can be found on the 
+[Pano Logic Hackers wiki](https://github.com/tomverbeure/panologic-g2/wiki)
+
