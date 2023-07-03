@@ -20,14 +20,25 @@
 bool ButtonJustPressed(void);
 int TestSignalCmd(char *CmdLine);
 int DirCmd(char *CmdLine);
+int DumpCmd(char *CmdLine);
+uint32_t __attribute__((noinline)) GetSp(void);
+int TestWriteCmd(char *CmdLine);
+int TypeCmd(char *CmdLine);
+int DelCmd(char *CmdLine);
 int DiskInitCmd(char *CmdLine);
 int CSD_Cmd(char *CmdLine);
+int CID_Cmd(char *CmdLine);
+int ReadFile(char *Path,bool bDump);
 
 const CommandTable_t gCmdTable[] = {
    { "csd", "dump CSD register", NULL, CSD_Cmd},
+   { "cid", "dump CID register", NULL, CID_Cmd},
+   { "del", "del <path> - delete a file",NULL, DelCmd},
    { "dir", "directory <path>",NULL, DirCmd},
+   { "dump", "dump <path>",NULL, DumpCmd},
    { "disk_init","Initialize SDCARD interface", NULL, DiskInitCmd},
-   { "test_signal","Send binary count to SDCARD GPIO pins", NULL, TestSignalCmd},
+   { "test_write","<path> create a file", NULL, TestWriteCmd},
+   { "type","<path> display file on console", NULL, TypeCmd},
    { "?", NULL, NULL, HelpCmd},
    { "help",NULL, NULL, HelpCmd},
    { NULL }  // end of table
@@ -38,6 +49,8 @@ const char gVerStr[] = "Pano SD Card test program compiled " __DATE__ " " __TIME
 #define RX_BUF_LEN            80
 char gRxBuf[RX_BUF_LEN];
 int gRxCount;
+bool gDiskInitialized = false;
+FATFS gFatFs;
 
 void SendPrompt(void);
 
@@ -53,6 +66,8 @@ int main(int argc, char *argv[])
     uint32_t Led;
     int Fast = 0;
     char Char;
+
+    LOG("SP 0x%x\n",GetSp());
 
 // Set LED GPIO's to output
     Temp = REG_RD(GPIO_BASE + GPIO_DIRECTION);
@@ -179,16 +194,43 @@ int TestSignalCmd(char *CmdLine)
 int DiskInitCmd(char *CmdLine)
 {
    DSTATUS Status;
+   bool bMsgSent = false;
+   int res;
+   int Ret = RESULT_ERR;
 
-   printf("Press any key to exit\n");
    do {
-      Status = disk_initialize(0);
-      break;
-   } while(Status !=0 && !uartlite_haschar());
-   uartlite_getchar();
-   LOG("disk_initialize returned %d\n",Status);
+      do {
+         if((Status = disk_initialize(0)) == 0) {
+            gDiskInitialized = true;
+            break;
+         }
+         if(!bMsgSent) {
+            bMsgSent = true;
+            printf("Inital call failed, retrying.\n");
+            printf("Press any key to give up\n");
+         }
+      } while(Status != 0 && !uartlite_haschar());
 
-   return RESULT_OK;
+      if(uartlite_haschar()) {
+         uartlite_getchar();
+      }
+
+      if(bMsgSent) {
+         LOG("disk_initialize returned %d\n",Status);
+      }
+
+      if(Status != 0) {
+         break;
+      }
+         
+      if((res = f_mount(&gFatFs,"", 1)) != FR_OK) {
+         ELOG("Unable to mount filesystem: %d\n",res);
+         break;
+      }
+      Ret = RESULT_OK;
+   } while(false);
+
+   return Ret;
 }
 
 DIR Dir;             /* Directory object */
@@ -202,15 +244,14 @@ int DirCmd(char *CmdLine)
    DWORD acc_files = 0;
    DWORD dw;
    FATFS *fs;
-   FATFS FatFs;           /* File system object for each logical drive */
 
    do {
-      res = f_mount(&FatFs, "", 1);
-      if(res != FR_OK) {
-         ELOG("Unable to mount filesystem: %d\n",res);
+      if(!gDiskInitialized) {
+         DiskInitCmd(NULL);
+      }
+      if(!gDiskInitialized) {
          break;
       }
-
       res = f_opendir(&Dir,CmdLine);
       if(res) {
          ELOG("f_opendir failed: %d\n",res);
@@ -419,6 +460,20 @@ const ParseCSDTable gCsdVer1[] = {
    {NULL}   // end of table
 };
 
+const ParseCSDTable gCid[] = {
+   {"MID",127,120,0},
+   {"OID",119,104,0},
+   {"PNM",103,64,0},
+   {"PRV",63,56,0},
+   {"PSN",55,24,0},
+   {"MDT",19,8,0},
+   {"year",19,12,0},
+   {"month",11,8,0},
+   {"CRC",7,1,0},
+   {"STOP",0,0,0},
+   {NULL}   // end of table
+};
+
 int CSD_Cmd(char *CmdLine)
 {
    BYTE raw_csd[16];
@@ -503,7 +558,6 @@ int CSD_Cmd(char *CmdLine)
          p++;
       }
    } while(false);
-#if 0
    crc = CRC7_buf(csd,sizeof(csd) - 1);
    LOG("CRC 0x%x\n",crc);
 
@@ -511,7 +565,11 @@ int CSD_Cmd(char *CmdLine)
    csd[0] = 0x40;
    crc = CRC7_buf(csd,5);
    LOG("CMD0 CRC 0x%x\n",crc);
+   csd[0] = 0x41;
+   crc = CRC7_buf(csd,5);
+   LOG("CMD1 CRC 0x%x\n",crc);
 
+#if 0
    csd[0] = 0x48;
    csd[3] = 1;
    csd[4] = 0xaa;
@@ -524,3 +582,203 @@ int CSD_Cmd(char *CmdLine)
    }
    return RESULT_OK;
 }
+
+int CID_Cmd(char *CmdLine)
+{
+   BYTE raw_cid[16];
+   BYTE cid[16];
+   BYTE Err;
+   int Line = 0;
+   int x;
+   const ParseCSDTable *p;
+   uint8_t crc;
+   int CsdVer;
+   uint8_t VerMask;
+   uint8_t Flags;
+   int64_t C_Size;
+   bool bDisplayAll = false;
+
+   if(strcasecmp(CmdLine,"all") == 0) {
+      bDisplayAll = true;
+      LOG("bDisplayAll\n");
+   }
+
+   do {
+      if((Err = send_cmd(CMD10,0) != 0)) {
+         Line = __LINE__;
+         break;
+      }
+      if((Err = rcvr_datablock(raw_cid,sizeof(raw_cid))) != 1) {
+         Line = __LINE__;
+         break;
+      }
+   // Convert raw CSD data to from big endian 32 bit words to little endian
+   // (Linux kernal calls be32_to_cpu to do this)
+      for(int i = 0; i < 4; i++) {
+         for(int j = 0; j < 4; j++) {
+            cid[(i * 4) + j] = raw_cid[(i * 4) +3-j];
+         }
+      }
+      LOG_HEX(raw_cid,sizeof(raw_cid));
+      LOG_HEX(cid,sizeof(cid));
+
+      p = gCid;
+      while(p->Desc != NULL) {
+         x = CSD_SLICE((uint32_t *)cid,p->EndBit,p->StartBit);
+         printf("%s: %d (0x%x)\n",p->Desc,x,x);
+         p++;
+      }
+   } while(false);
+
+   if(Line != 0) {
+      LOG("Failure on line %d, %d\n",Line,Err);
+   }
+   return RESULT_OK;
+}
+
+int ReadFile(char *Path,bool bDump)
+{
+   FRESULT Err;
+   UINT bw;
+   int Line = 0;
+   FIL Fil;
+   bool bFileOpen = false;
+   uint8_t TestData[64];
+
+   do {
+      if(!Path[0]) {
+         printf("Usage: test_write <path>\n");
+         break;
+      }
+      if(!gDiskInitialized) {
+         LOG("Calling DiskInitCmd\n");
+         DiskInitCmd(NULL);
+      }
+
+      if(!gDiskInitialized) {
+         break;
+      }
+      if(!bFileOpen) {
+         if((Err = f_open(&Fil,Path,FA_READ)) != FR_OK) {
+            Line = __LINE__;
+            break;
+         }
+      }
+      bFileOpen = true;
+      if((Err = f_read(&Fil,TestData,sizeof(TestData),&bw)) != FR_OK) {
+         Line = __LINE__;
+         break;
+      }
+      if(bw > sizeof(TestData)) {
+         LOG("unexpected read length, requested %d, f_write returned %d\n",
+             sizeof(TestData),bw);
+         break;
+      }
+      if(bw == 0) {
+         break;
+      }
+      if(bDump) {
+         LOG_HEX(TestData,bw);
+      }
+      else {
+         UINT i;
+         char c;
+
+         for(i = 0; i < bw; i++) {
+            c = TestData[i];
+            if((c >= ' ' && c <= 0x7f) || c == '\n') {
+               _putchar(c);
+            }
+         }
+      }
+      if(bw < sizeof(TestData)) {
+         break;
+      }
+   } while(true);
+
+   if(bFileOpen) {
+      if((Err = f_close(&Fil)) != FR_OK) {
+         Line = __LINE__;
+      }
+   }
+
+   if(Line != 0) {
+      LOG("Failure on line %d, %d\n",Line,Err);
+   }
+   return RESULT_OK;
+}
+
+int TypeCmd(char *CmdLine)
+{
+   return ReadFile(CmdLine,false);
+}
+
+int DumpCmd(char *CmdLine)
+{
+   return ReadFile(CmdLine,true);
+}
+
+
+int TestWriteCmd(char *CmdLine)
+{
+   FRESULT Err;
+   UINT bw;
+   int Line = 0;
+   FIL Fil;
+   const char TestData[] = "This is a test an only a test\r\n";
+
+   do {
+      if(!CmdLine[0]) {
+         printf("Usage: test_write <path>\n");
+         break;
+      }
+      if(!gDiskInitialized) {
+         LOG("Calling DiskInitCmd\n");
+         DiskInitCmd(NULL);
+      }
+
+      if(!gDiskInitialized) {
+         break;
+      }
+      if((Err = f_open(&Fil,CmdLine,FA_WRITE | FA_CREATE_ALWAYS)) != FR_OK) {
+         Line = __LINE__;
+         break;
+      }
+      if((Err = f_write(&Fil,TestData,sizeof(TestData),&bw)) != FR_OK) {
+         Line = __LINE__;
+         break;
+      }
+      if(bw != sizeof(TestData)) {
+         LOG("unexpected write length, requested %d, f_write returned %d\n",
+             sizeof(TestData),bw);
+         break;
+      }
+      if((Err = f_close(&Fil)) != FR_OK) {
+         Line = __LINE__;
+         break;
+      }
+   } while(false);
+
+   if(Line != 0) {
+      LOG("Failure on line %d, %d\n",Line,Err);
+   }
+   return RESULT_OK;
+}
+
+int DelCmd(char *CmdLine)
+{
+   FRESULT Err = f_unlink(CmdLine);
+
+   if(Err != FR_OK) {
+      LOG("f_unlink failed, %d\n",Err);
+   }
+
+   return RESULT_OK;
+}
+
+uint32_t __attribute__((noinline)) GetSp()
+{
+   asm("mv a0, sp");
+}
+
+

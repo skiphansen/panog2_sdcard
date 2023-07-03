@@ -10,8 +10,8 @@ USB of course would be ideal if we can get [panog2_usb](https://github.com/skiph
 
 ## Project Status
 
-Basics are working, able to list a directory of SD Card that was cerated on a PC.  A simple test CLI is provided via
-a serial port 
+Seems to be working fine, can list a directory, and read/write/delete files.
+A simple test CLI is provided via a serial port for testing.
 
 ## HW Requirements
 
