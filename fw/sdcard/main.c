@@ -13,6 +13,10 @@
 #include "ff.h"
 #include "diskio.h"
 #include "sdmm.h"
+#ifndef   BIT_BANG_SPI
+#include "spi_lite.h"
+#endif
+
 #define DEBUG_LOGGING         1
 // #define VERBOSE_DEBUG_LOGGING 1
 #include "log.h"
@@ -66,8 +70,6 @@ int main(int argc, char *argv[])
     uint32_t Led;
     int Fast = 0;
     char Char;
-
-    LOG("SP 0x%x\n",GetSp());
 
 // Set LED GPIO's to output
     Temp = REG_RD(GPIO_BASE + GPIO_DIRECTION);
@@ -198,6 +200,9 @@ int DiskInitCmd(char *CmdLine)
    int res;
    int Ret = RESULT_ERR;
 
+#ifndef   BIT_BANG_SPI
+   spi_init(CONFIG_SPILITE_BASE);
+#endif
    do {
       do {
          if((Status = disk_initialize(0)) == 0) {

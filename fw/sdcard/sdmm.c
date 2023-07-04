@@ -26,7 +26,6 @@
 
 /-------------------------------------------------------------------------*/
 
-
 #include "ff.h"      /* Obtains integer types for FatFs */
 #include "diskio.h"  /* Common include file for FatFs and disk I/O layer */
 #include "sdmm.h"
@@ -45,7 +44,7 @@
 // #define VERBOSE_DEBUG_LOGGING 1
 #include "log.h"
 
-
+#ifdef BIT_BANG_SPI
 #define DO_INIT()             /* Initialize port for MMC DO as input */ \
    REG_WR(GPIO_BASE + GPIO_DIRECTION,REG_RD(GPIO_BASE + GPIO_DIRECTION) & ~SD_SO_BIT)
 
@@ -82,8 +81,16 @@
 #define READ_DELAY() /* delay 50 ns or 2 1/2 instructions on our 50 Mhz RISC-V  */\
    asm("nop");asm("nop");asm("nop")
 
+#else
+#include <stdbool.h>
+#include "spi_lite.h"
+#include "spi_drv.h"
+#endif   // BIT_BANG_SPI
+
 /* Delay n microseconds */
 #define dly_us(n) timer_sleep_us(n)
+
+static int wait_ready(void);
 
 
 /*--------------------------------------------------------------------------
@@ -100,6 +107,7 @@ BYTE CardType;       /* b0:MMC, b1:SDv1, b2:SDv2, b3:Block addressing */
 
 
 
+#ifdef BIT_BANG_SPI
 /*-----------------------------------------------------------------------*/
 /* Transmit bytes to the card (bitbanging)                               */
 /*-----------------------------------------------------------------------*/
@@ -188,30 +196,6 @@ void rcvr_mmc (
    } while(--bc);
 }
 
-
-
-/*-----------------------------------------------------------------------*/
-/* Wait for card ready                                                   */
-/*-----------------------------------------------------------------------*/
-
-static
-int wait_ready (void)   /* 1:OK, 0:Timeout */
-{
-   BYTE d;
-   UINT tmr;
-
-
-   for(tmr = 5000; tmr; tmr--) {   /* Wait for ready in timeout of 500ms */
-      rcvr_mmc(&d, 1);
-      if(d == 0xFF) break;
-      dly_us(100);
-   }
-
-   return tmr ? 1 : 0;
-}
-
-
-
 /*-----------------------------------------------------------------------*/
 /* Deselect the card and release SPI bus                                 */
 /*-----------------------------------------------------------------------*/
@@ -244,6 +228,96 @@ int Select (void) /* 1:OK, 0:Timeout */
    return 0;         /* Failed */
 }
 
+#else
+/*-----------------------------------------------------------------------*/
+/* Transmit bytes to the card (bitbanging)                               */
+/*-----------------------------------------------------------------------*/
+
+static
+void xmit_mmc (
+              const BYTE* buff, /* Data to be sent */
+              UINT bc           /* Number of bytes to send */
+              )
+{
+   do {
+      spi_sendrecv(*buff++);
+   } while(--bc);
+}
+
+
+
+/*-----------------------------------------------------------------------*/
+/* Receive bytes from the card (bitbanging)                              */
+/* NB: new data is triggered by the FALLING edge of the clock and is     */
+/* available some time later (F'ing secret specs! The timing section     */
+/* of "simplified" SD card spec is redacted! The specs for a couple or   */
+/* random SD Cards shows 50ns during identification mode and 14ns        */
+/* otherwise.  50ns is 2 1/2 instructions on our 50 Mhz RISC-V           */
+/*-----------------------------------------------------------------------*/
+
+void rcvr_mmc (
+              BYTE *buff, /* Pointer to read buffer */
+              UINT bc     /* Number of bytes to receive */
+              )
+{
+   do {
+      *buff++ = spi_sendrecv(0xff);
+   } while(--bc);
+}
+/*-----------------------------------------------------------------------*/
+/* Deselect the card and release SPI bus                                 */
+/*-----------------------------------------------------------------------*/
+
+static
+void deselect (void)
+{
+   BYTE d;
+
+   spi_cs(SPI_CS_INACTIVE);
+   rcvr_mmc(&d, 1);  /* Dummy clock (force DO hi-z for multiple slave SPI) */
+}
+
+
+
+/*-----------------------------------------------------------------------*/
+/* Select the card and wait for ready                                    */
+/*-----------------------------------------------------------------------*/
+
+static
+int Select (void) /* 1:OK, 0:Timeout */
+{
+   BYTE d;
+
+   spi_cs(SPI_CS_SDCARD);
+   rcvr_mmc(&d, 1);  /* Dummy clock (force DO enabled) */
+   if(wait_ready()) return 1;   /* Wait for card ready */
+
+   deselect();
+   return 0;         /* Failed */
+}
+
+#endif
+
+
+/*-----------------------------------------------------------------------*/
+/* Wait for card ready                                                   */
+/*-----------------------------------------------------------------------*/
+
+static
+int wait_ready (void)   /* 1:OK, 0:Timeout */
+{
+   BYTE d;
+   UINT tmr;
+
+
+   for(tmr = 5000; tmr; tmr--) {   /* Wait for ready in timeout of 500ms */
+      rcvr_mmc(&d, 1);
+      if(d == 0xFF) break;
+      dly_us(100);
+   }
+
+   return tmr ? 1 : 0;
+}
 
 
 /*-----------------------------------------------------------------------*/
@@ -391,10 +465,12 @@ DSTATUS disk_initialize (
    if(drv) return RES_NOTRDY;
 
    dly_us(10000);       /* 10ms */
+#ifdef BIT_BANG_SPI
    CS_INIT(); CS_H();      /* Initialize port pin tied to CS */
    CK_INIT(); CK_L();      /* Initialize port pin tied to SCLK */
    DI_INIT();           /* Initialize port pin tied to DI */
    DO_INIT();           /* Initialize port pin tied to DO */
+#endif
 
    for(n = 10; n; n--) rcvr_mmc(buf, 1); /* Apply 80 dummy clocks and the card gets ready to receive command */
 

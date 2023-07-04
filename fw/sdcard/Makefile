@@ -11,6 +11,7 @@ EXTRA_SRC   += $(PANO_FW_DIR)/common/spi_drv.c
 EXTRA_SRC   += $(PANO_FW_DIR)/common/cmd_parser.c
 EXTRA_SRC   += $(PANO_FW_DIR)/common/log.c
 EXTRA_CFLAGS += -DALTERNATE_PRINTF
+#EXTRA_CFLAGS += -DBIT_BANG_SPI
 
 INCLUDE_PATH += ../include
 INCLUDE_PATH += $(PANO_FW_DIR)/common
