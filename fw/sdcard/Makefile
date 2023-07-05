@@ -1,5 +1,6 @@
 include ../../project.mk
 
+STACK_SIZE   = 8192
 TARGET       = sdcard
 
 # source to include
