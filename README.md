@@ -55,7 +55,7 @@ I used an this Micro SD Card breakout board from [Adafruit](https://www.adafruit
 mounted it using double stick tape to the side of the Pano.<br><br>
 <img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/double_stick_tape.png" width=50%>|
 
-To provide a channel for wires routing the rubber gasket was cut.<br><br>
+To provide a channel for routing wires the rubber gasket was cut.<br><br>
 <img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/wire_exit_1.png" width=50%><img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/reassembled.png" width=50%>|
 
 ## CLI
