@@ -230,7 +230,7 @@ int Select (void) /* 1:OK, 0:Timeout */
 
 #else
 /*-----------------------------------------------------------------------*/
-/* Transmit bytes to the card (bitbanging)                               */
+/* Transmit bytes to the card (spi RTL)                                  */
 /*-----------------------------------------------------------------------*/
 
 static
@@ -477,7 +477,7 @@ DSTATUS disk_initialize (
    ty = 0;
    
    if((Ret = send_cmd(CMD0, 0)) != 1) {
-      LOG("send_cmd returned %d\n",Ret);
+      // LOG("send_cmd returned %d\n",Ret);
    }
    else {
   /* Enter Idle state */

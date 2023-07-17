@@ -1,53 +1,106 @@
 ## SD Card support for Pano Logic Thin Clients
 
+<img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/mounted.png" width=50%>
+
 https://github.com/skiphansen/panog2_sdcard
 
-This is a work in progress to provide mass storage support for G2 Panos since I have 
-been unable to get USB working.  
+This project provides an example of how an SD card can be connected to a 
+Pano Logic G2 to provide mass storage support.
 
-USB of course would be ideal if we can get [panog2_usb](https://github.com/skiphansen/panog2_usb) working!
-**HELP** is **welcome** and **NEEDED**!
+USB of course would be ideal for mass storage, but we have been unable to 
+get USB working.  **HELP** is **welcome** and **NEEDED** getting 
+[panog2_usb](https://github.com/skiphansen/panog2_usb) working!
 
-## Project Status
-
-Seems to be working fine, can list a directory, and read/write/delete files.
 A simple test CLI is provided via a serial port for testing.
 
-## HW Requirements
+## Requirements
 
 * A Pano Logic G2
 * A suitable 5 volt power supply
+* An SD card breakout board and SD card.
+* A serial port cable to access test CLI.
 * A JTAG programmer to load the bitstream into the FPGA.
 
 ## Connecting SD Card
 
-The ultimate plan is to connect the SD Card in parallel with the existing SPI flash using the SPI flash's write protect line 
-as a chip select for the SD card.  This should be allow an SD card to be added without compromising any other functionality.
+The SD Card is connected in parallel with the existing SPI flash using the SPI 
+flash's write protect line as a chip select for the SD card.  Normal operation 
+of the existing SPI flash is not affected.
 
-Currently for wiring convenience I have connected the SD Card to some of the DVI port signals. 
 
-| Pano      | SDCARD | board to board<br>connector pin| CN3<br>pin  | ribbon cable<br>color | FPGA<br>pin |  
-|-----------|--------|----------------|------|--------|------|
-| +3.3V     | +3.3V  | outside 2      | 22   | brown  |      |
-| GND       | GND    | inside 22      | 2    | brown  |      |
-| GND       | GND    | outside 22     | 4    | orange |      |
-| DVI_D[0]  | CLK    | Outside 3      | 25   | blue   | D17  |
-| DVI_D[1]  | SO/D0  | Inside 3       | 26   | green  | A14  |
-| DVI_D[2]  | SI/CMD | Outside 4      | 23   | yellow | A16  |
-| DVI_D[3]  | CS/D3  | inside 4       | 24   | orange | A14  |
-| DVI_D[4]  | D1     | outside 5      | 21   | red    | A17  |
-| DVI_D[5]  | D2     | inside 5       | 19   | black  | A18  |
-| DVI_D[6]  | DET    | outside 7      | 20   | white  | D14  |
-| DVI_D[7]  |   -    | inside 7       | 17   | gray   | B14  |
-| DVI_D[8]  |   -    | outside 8      | 18   | violet | B16  |
-| DVI_D[9]  |   -    | inside 8       | 15   | blue   | B18  |
-| DVI_D[10] |   -    | outside 9      | 16   | green  | E16  |
-| DVI_D[11] |   -    | inside 9       | 13   | yellow | D15  |
-| DVI_H     |   -    | inside 20      | 14   | orange | F12  |
+| Pano      | SD CARD | SPI flash<br> pin | FPGA pin |  
+|-----------|--------|---------------|----------|
+| +3.3V     | +3.3V  |      8        |          |
+| GND       | GND    |      4        |          |
+| SPI_CCLK  | CLK    |      6        |    Y21   |
+| FPGA_DIN  | SO/D0  |      2        |    AA20  |
+| SPI_MOSI  | SI/CMD |      5        |    AB20  |
+| SPI_WR_N  | CS/D3  |      3        |    AA18  |
 
-## Serial port 
+Note it may be easier to solder to vias or other component leads rather than
+the pins of the SPI flash chip.
 
-Please see the [fpga_test_soc](https://github.com/skiphansen/fpga_test_soc/tree/master/fpga/panologic_g2#serial-port) for connection information.
+| SD CARD | SPI flash<br> pin | alternate connection points |
+|--------|----------|----------|
+| +3.3V  | 8        | rear end of C79 on bottom of PCB<br><br><img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/vcc.png" width=50%> |
+| GND    | 4        | JTAG connector P2 pin 6 on bottom of PCB<br><br><img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/gnd.png" width=50%>
+| SI/CMD | 5        | via next to pin 5 on bottom of PCB<br><br><img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/top_big.png" width=50%> |
+| CLK    | 6        | via next to pin 6 on bottom of PCB |
+| SO/D0  | 2        | rear end of R145 on top of PCB<br><br><img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/bottom_big.png" width=50%>|
+| CS/D3  | 3        | Front end of R154 on top of PCB |
+
+## Mounting SD card
+
+I used an this Micro SD Card breakout board from [Adafruit](https://www.adafruit.com/product/4682) and
+mounted it using double stick tape to the side of the Pano.<br><br>
+<img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/double_stick_tape.png" width=50%>|
+
+To provide a channel for wires routing the rubber gasket was cut.<br><br>
+<img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/wire_exit_1.png" width=50%><img src="https://github.com/skiphansen/panog2_sdcard/blob/master/assets/reassembled.png" width=50%>|
+
+## CLI
+
+To use the CLI provided by this example to test your connections you will need 
+a serial port cable plugged into the micro HDMI connector.  
+
+Please see [fpga_test_soc](https://github.com/skiphansen/fpga_test_soc/tree/master/fpga/panologic_g2#serial-port)
+for connection information.
+
+This example provides commands to test the ability to read, write, erase and 
+list files on and SD card with a FAT filesystem.
+
+For example:
+
+````
+Pano SD Card test program compiled Jul 16 2023 18:07:15
+sdcard> help
+Commands:
+  csd - dump CSD register
+  cid - dump CID register
+  del - del <path> - delete a file
+  dir - directory <path>
+  dump - dump <path>
+  disk_init - Initialize SDCARD interface
+  test_write - <path> create a file
+  type - <path> display file on console
+sdcard> dir
+----A 2023/01/24 09:00     72872  de10_nano_hdmi_config.bin
+----A 2023/01/24 09:00   3368700  de10-nano.rbf
+----A 2023/01/24 09:00     70180  dump_adv7513_edid.bin
+----A 2023/01/24 09:00     66672  dump_adv7513_regs.bin
+D---- 2023/01/24 09:00         0  extlinux
+----A 2023/01/24 09:00     29940  socfpga_cyclone5_de10_nano.dtb
+----A 2023/01/24 09:00    134035  splash.png
+----A 2023/01/24 09:00   8067928  zImage
+----A 2023/01/24 09:00  92491518  release.7z
+D---- 2023/01/24 09:00         0  Scripts
+----A 2023/01/24 09:00    150989  gamecontrollerdb.txt
+D---- 2023/01/24 09:00         0  config
+   9 File(s), 104452834 bytes total
+   3 Dir(s),   15849472 bytes free
+sdcard>
+
+````
 
 ## Building, etc
 
@@ -57,4 +110,14 @@ Please see the [fpga_test_soc](https://github.com/skiphansen/fpga_test_soc/tree/
 
 Links to other Pano logic information can be found on the 
 [Pano Logic Hackers wiki](https://github.com/tomverbeure/panologic-g2/wiki)
+
+# Acknowledgement and Thanks
+This project uses code from several other projects including:
+- [ultraembedded's fpga_test_soc](https://github.com/ultraembedded/fpga_test_soc.git)
+- [ChaN's FatFs](http://elm-chan.org/fsw/ff/00index_e.html)
+
+# LEGAL 
+
+My original work (the sd_card example program and gateware) is 
+released under the GNU General Public License, version 2.
 
